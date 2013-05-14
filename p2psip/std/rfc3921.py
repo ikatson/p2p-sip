@@ -88,7 +88,7 @@ class Connector(XMLList):
     def process(self, data): pass       # should be overridden by sub-class
     
     @Property
-    def connection():
+    def connection(self):
         def fget(self): return self._connection
         def fset(self, value):
             if value != self._connection:
@@ -102,7 +102,7 @@ class Connector(XMLList):
         return locals()
     
     @Property
-    def filter():
+    def filter(self):
         def fget(self): return self._filter
         def fset(self, value):
             if value != self._filter:
@@ -183,7 +183,7 @@ class Roster(Connector):
         return self.connection is not None and self.connection.jid or JID()
     
     @Property
-    def presence():
+    def presence(self):
         '''Represents local user's presence as a read-write attribute.'''
         def fget(self): return self._presence
         def fset(self, value): 

@@ -74,7 +74,7 @@ class Stanza(XML):
         else: return XML.__getattribute__(self, key)
         
     @Property
-    def timestamp():
+    def timestamp(self):
         '''Get as XML. Set as XML or date-time string or None (to use current date-time)'''
         def fget(self): return F(self('x'))
         def fset(self, value):
@@ -85,7 +85,7 @@ class Stanza(XML):
         return locals()
     
     @Property
-    def error():
+    def error(self):
         '''Get as XML. Set as XML or dict(type='mytype', condition='mycondition', xmlns='myxmlns', text='my text')'''
         def fget(self): return F(self('error')) if self.type == 'error' else None
         def fset(self, value): 
@@ -104,7 +104,7 @@ class Stanza(XML):
         return locals()
     
     @property
-    def properties():
+    def properties(self):
         '''set of xmlns of children elements'''
         return set(map(lambda y: y.xmlns, filter(lambda x: x.xmlns is not None, self())))
 
