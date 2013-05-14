@@ -236,20 +236,20 @@ class User(object):
         self.transport = sip.TransportInfo(self.sock)
         self.stack = sip.Stack(self, self.transport) # create a SIP stack instance
         self.reg = None   # registration UAC
-        
+
         if _debug: print 'User created on listening=', sock.getsockname(), 'advertised=', self.sockaddr
         if start:
             self.start()
-            
+
     def __del__(self):
         '''Destroy other internal references to Stack, etc.'''
         self.stop()
         self.reg = None
         if self.stack: self.stack.app = None # TODO: since self.stack has a reference to this, __del__will never get called. 
         self.sock = self.stack = None
-    
+
     #----------------------------- start/stop daemon ---------------------- 
-       
+
     def start(self, maxsize=1500, interval=180):
         '''Start the listener, if not already started.'''
         if not self._listenergen:
@@ -259,16 +259,16 @@ class User(object):
             self._natcheckgen = self._natcheck(interval=interval)
             multitask.add(self._natcheckgen) # start the task that periodically checks the nat type
         return self
-    
+
     def stop(self):
         '''Stop the listener, if already present'''
-        if self._listenergen: 
+        if self._listenergen:
             self._listenergen.close()
-        if self._natcheckgen: 
+        if self._natcheckgen:
             self._natcheckgen.close()
         self._listenergen = self._natcheckgen = None
         return self
-    
+
     def _listener(self, maxsize, interval):
         '''Listen for transport messages on the signaling socket. The default maximum 
         packet size to receive is 1500 bytes. The interval argument specifies how
@@ -284,7 +284,7 @@ class User(object):
         except GeneratorExit: pass
         except: print 'User._listener exception', (sys and sys.exc_info() or None); traceback.print_exc(); raise
         if _debug: print 'terminating User._listener()'
-    
+
     def _natcheck(self, interval):
         '''Periodically discover the NAT behavior. Default interval is every 3 min (180s).
         This is a generator function and should be invoked as multitask.add(u._natcheck())'''
@@ -296,11 +296,11 @@ class User(object):
         except GeneratorExit: pass
         except: print 'User._natcheck exception', (sys and sys.exc_info() or None)
         if _debug: print 'terminating User._natcheck()'
-        
+
 
     #-------------------- binding related ---------------------------------
-    
-    def bind(self, address, username=None, password=None, interval=180, refresh=False, update=False): 
+
+    def bind(self, address, username=None, password=None, interval=180, refresh=False, update=False):
         '''Register the local address with the server to receive incoming requests.
         This is a generator function, and returns either ('success', None) for successful
         registration or ('failed', 'reason') for a failure. The username and password 
@@ -308,10 +308,10 @@ class User(object):
         controls how long the registration is valid, and refresh if set to True causes 
         automatic refresh of registration before it expires. 
         If update is set to True then also update the self.transport.host with local address.uri.host.'''
-        
-        if self.reg: 
+
+        if self.reg:
             raise StopIteration(('failed', 'Already bound'))
-        
+
         address = self.address = Address(str(address))
         if not address.uri.scheme: address.uri.scheme = 'sip' # default scheme
         self.username, self.password = username or self.username or address.uri.user, password or self.password
@@ -323,7 +323,7 @@ class User(object):
         if _debug: print 'received response', result
         if result == 'failed': self.reg = None
         raise StopIteration((result, reason))
-                    
+
     def close(self):
         '''Close the binding by unregistering with the SIP server.'''
         if not self.reg:
@@ -332,7 +332,7 @@ class User(object):
         if reg.gen: reg.gen.close(); reg.gen = None
         result, reason = (yield self._bind(interval=0, refresh=False, wait=False))
         raise StopIteration((result, reason))
-            
+
     def _bind(self, interval, refresh, wait):
         '''Internal function to perform bind and wait for response, and schedule refresh.'''
         try:
@@ -368,7 +368,7 @@ class User(object):
             m.Expires = sip.Header(str(interval), 'Expires')
             return m
         else: return None
-    
+
     #-------------------------- Session related methods -------------------
     def connect(self, dest, mediasock=None, sdp=None, provisional=False):
         '''Invite a remote destination to a session. This is a generator function, which 
@@ -377,8 +377,8 @@ class User(object):
         for that mediasock socket, without SDP. Otherwise, the given sdp (rfc4566.SDP) is used 
         to negotiate the session. On success the returned Session object has mysdp and yoursdp
         properties storing rfc4566.SDP objects in the offer and answer, respectively.'''
-        if self.nattype == 'blocked': 
-            raise StopIteration((None, 'udp blocking network')) 
+        if self.nattype == 'blocked':
+            raise StopIteration((None, 'udp blocking network'))
         else:
             dest = Address(str(dest))
             if not dest.uri:
@@ -386,7 +386,7 @@ class User(object):
             ua = self.createClient(dest)
             ua.queue = multitask.Queue() # to receive responses
             m = ua.createRequest('INVITE')
-            
+
             if mediasock is not None:
                 local = yield self._getLocalCandidates(mediasock) # populate the media candidates
                 for c in local: # add proprietary SIP header - Candidate
@@ -400,7 +400,7 @@ class User(object):
             ua.sendRequest(m)
             session, reason = yield self.continueConnect((ua, dest, mediasock, sdp, local), provisional=provisional)
             raise StopIteration(session, reason)
-                    
+
     def continueConnect(self, context, provisional):
         ua, dest, mediasock, sdp, local = context
         while True:
@@ -416,23 +416,23 @@ class User(object):
                 session = Session(user=self, dest=dest)
                 session.ua, session.mediasock = hasattr(ua, 'dialog') and ua.dialog or ua, mediasock
                 session.mysdp, session.yoursdp, session.local = sdp, None, local
-                session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in response.all('Candidate')] # store remote candidates if available 
-                
+                session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in response.all('Candidate')] # store remote candidates if available
+
                 if response.body and response['Content-Type'] and response['Content-Type'].value.lower() == 'application/sdp':
                     session.yoursdp = SDP(response.body)
-                
+
                 yield session.start(True)
                 raise StopIteration((session, None))
             elif response.isfinal: # some failure
                 raise StopIteration((None, str(response.response) + ' ' + response.responsetext))
-    
+
     def accept(self, arg, mediasock=None, sdp=None):
         '''Accept a incoming connection from given arg (dest, ua). The arg is what is supplied
         in the 'connect' notification from recv() method's return value.'''
         dest, ua = arg
         m = ua.createResponse(200, 'OK')
         ua.queue = multitask.Queue()
-        
+
         if mediasock is not None:
             local = yield self._getLocalCandidates(mediasock)
             for c in local: # add proprietary SIP header - Candidate
@@ -442,9 +442,9 @@ class User(object):
             m['Content-Type'] = sip.Header('application/sdp', 'Content-Type')
         else:
             raise StopIteration((None, 'either mediasock or sdp must be supplied'))
-            
+
         ua.sendResponse(m)
-        
+
         try:
             while True:
                 request = yield ua.queue.get(timeout=5) # wait for 5 seconds for ACK
@@ -452,27 +452,27 @@ class User(object):
                     session, incoming = Session(user=self, dest=dest), ua.request
                     session.ua, session.mediasock = hasattr(ua, 'dialog') and ua.dialog or ua, mediasock
                     session.mysdp, session.yoursdp, session.local = sdp, None, local
-                    session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in incoming.all('Candidate')] # store remote candidates 
-                    
+                    session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in incoming.all('Candidate')] # store remote candidates
+
                     if incoming.body and incoming['Content-Type'] and incoming['Content-Type'].value.lower() == 'application/sdp':
                         session.yoursdp = SDP(incoming.body)
-                    
+
                     yield session.start(False)
                     raise StopIteration((session, None))
         except multitask.Timeout: pass
         except GeneratorExit: pass
-        
+
         raise StopIteration((None, 'didnot receive ACK'))
-    
+
     def reject(self, arg, reason='486 Busy here', headers=None):
         code, sep, phrase = reason.partition(' ')
         try: code = int(code) if code else ''
         except: pass
         if not isinstance(code, int): code, phrase = 603, reason # decline
         response = arg[1].createResponse(code, phrase)
-        if headers: [response.insert(h, append=True) for h in headers] 
+        if headers: [response.insert(h, append=True) for h in headers]
         arg[1].sendResponse(response)
-        
+
     def _getLocalCandidates(self, mediasock):
         local = [getlocaladdr(mediasock)] # first element is local-addr
         if _debug: print 'getting local candidates for nattype=', self.nattype
@@ -485,15 +485,15 @@ class User(object):
     def watch(self, dest):
         '''Watch for the presence status of the remote destination.'''
         raise StopIteration((None, 'Not implemented'))
-    
+
     def approve(self, arg):
         '''Approve the remote watcher to know our presence status.'''
         raise StopIteration((None, 'Not implemented'))
-    
+
     def block(self, arg):
         '''Block the remote watcher to know our presence status.'''
         raise StopIteration((None, 'Not implemented'))
-    
+
     def sendIM(self, dest, message):
         '''Send a paging-mode instant message to the destination and return ('success', None)
         or ('failed', 'reason')'''
@@ -509,22 +509,22 @@ class User(object):
                 raise StopIteration(('success', None))
             elif response.isfinal:
                 raise StopIteration(('failed', str(response.response) + ' ' + response.responsetext))
-    
+
     #-------------------------- generic event receive ---------------------
     def recv(self, timeout=None):
         if self._queue is None: self._queue = multitask.Queue()
         return self._queue.get(timeout=timeout)
-    
+
     #-------------------------- Interaction with SIP stack ----------------
     # Callbacks invoked by SIP Stack
-    def createServer(self, request, uri, stack): 
+    def createServer(self, request, uri, stack):
         '''Create a UAS if the method is acceptable. If yes, it also adds additional attributes
         queue and gen in the UAS.'''
         ua = request.method in ['INVITE', 'BYE', 'ACK', 'SUBSCRIBE', 'MESSAGE', 'NOTIFY'] and sip.UserAgent(self.stack, request) or None
         if ua: ua.queue = ua.gen = None
         if _debug: print 'createServer', ua
         return ua
-    
+
     def createClient(self, dest=None, setProxyUser=True):
         '''Create a UAC and add additional attributes: queue and gen.'''
         ua = sip.UserAgent(self.stack)
@@ -537,19 +537,19 @@ class User(object):
         if _debug: print 'createClient', ua
         return ua
 
-    def sending(self, ua, message, stack): 
+    def sending(self, ua, message, stack):
         pass
-    
+
     def receivedRequest(self, ua, request, stack):
         '''Callback when received an incoming request.'''
         def _receivedRequest(self, ua, request): # a generator version
-            if _debug: print 'receivedRequest method=', request.method, 'ua=', ua, ' for ua', (ua.queue is not None and 'with queue' or 'without queue') 
+            if _debug: print 'receivedRequest method=', request.method, 'ua=', ua, ' for ua', (ua.queue is not None and 'with queue' or 'without queue')
             if hasattr(ua, 'queue') and ua.queue is not None:
                 yield ua.queue.put(request)
             elif request.method == 'INVITE':    # a new invitation
                 if self._queue is not None:
                     if not request['Conf-ID']: # regular call invitation
-                        yield self._queue.put(('connect', (str(request.From.value), ua)))
+                        yield self._queue.put(('connect', (str(request.From.value), ua, request)))
                     else: # conference invitation
                         if request['Invited-By']:
                             yield self._queue.put(('confconnect', (str(request.From.value), ua)))
@@ -568,7 +568,7 @@ class User(object):
                     yield self._queue.put(('send', (str(request.From.value), request.body)))
                 else:
                     ua.sendResponse(405, 'Method not allowed')
-            elif request.method == 'CANCEL':   
+            elif request.method == 'CANCEL':
                 # TODO: non-dialog CANCEL comes here. need to fix rfc3261 so that it goes to cancelled() callback.
                 if ua.request.method == 'INVITE': # only INVITE is allowed to be cancelled.
                     yield self._queue.put(('close', (str(request.From.value), ua)))
@@ -579,15 +579,15 @@ class User(object):
     def receivedResponse(self, ua, response, stack):
         '''Callback when received an incoming response.'''
         def _receivedResponse(self, ua, response): # a generator version
-            if _debug: print 'receivedResponse response=', response.response, ' for ua', (ua.queue is not None and 'with queue' or 'without queue') 
+            if _debug: print 'receivedResponse response=', response.response, ' for ua', (ua.queue is not None and 'with queue' or 'without queue')
             if hasattr(ua, 'queue') and ua.queue is not None: # enqueue it to the ua's queue
                 yield ua.queue.put(response)
                 if _debug: print 'response put in the ua queue'
             else:
                 if _debug: print 'ignoring response', response.response
         multitask.add(_receivedResponse(self, ua, response))
-        
-    def cancelled(self, ua, request, stack): 
+
+    def cancelled(self, ua, request, stack):
         '''Callback when given original request has been cancelled by remote.'''
         def _cancelled(self, ua, request): # a generator version
             if hasattr(ua, 'queue') and ua.queue is not None:
@@ -595,23 +595,23 @@ class User(object):
             elif self._queue is not None and ua.request.method == 'INVITE': # only INVITE is allowed to be cancelled.
                 yield self._queue.put(('close', (str(request.From.value), ua)))
         multitask.add(_cancelled(self, ua, request))
-        
+
     def dialogCreated(self, dialog, ua, stack):
         dialog.queue = ua.queue
-        dialog.gen   = ua.gen 
+        dialog.gen   = ua.gen
         ua.dialog = dialog
         if _debug: print 'dialogCreated from', ua, 'to', dialog
         # else ignore this since I don't manage any dialog related ua in user
-        
+
     def authenticate(self, ua, obj, stack):
         '''Provide authentication information to the UAC or Dialog.'''
-        obj.username, obj.password = self.username, self.password 
+        obj.username, obj.password = self.username, self.password
         return obj.username and obj.password and True or False
 
     def createTimer(self, app, stack):
         '''Callback to create a timer object.'''
         return Timer(app)
-    
+
     # rfc3261.Transport related methods
     def send(self, data, addr, stack):
         '''Send data to the remote addr.'''
@@ -619,7 +619,7 @@ class User(object):
             if _debug: print 'sending[%d] to %s\n%s'%(len(data), addr, data)
             if self.sock:
                 if self.sock.type == socket.SOCK_STREAM:
-                    try: 
+                    try:
                         remote = self.sock.getpeername()
                         if remote != addr:
                             if _debug: print 'connected to wrong addr', remote, 'but sending to', addr
@@ -633,10 +633,10 @@ class User(object):
                     except socket.error:
                         if _debug: print 'socket error in send'
                 elif self.sock.type == socket.SOCK_DGRAM:
-                    try: 
+                    try:
                         yield self.sock.sendto(data, addr)
                     except socket.error:
-                        if _debug: print 'socket error in sendto' 
+                        if _debug: print 'socket error in sendto'
                 else:
                     if _debug: print 'invalid socket type', self.sock.type
         multitask.add(_send(self, data, addr))
@@ -663,7 +663,7 @@ class MediaSession(object):
                 for m, i in zip(offer['m'], ip): m['c'] = SDP.connection(address=i)
             self.mysdp, self.net[:] = offer, net
         elif yoursdp or request.body and request['Content-Type'] and request['Content-Type'].value.lower() == 'application/sdp': # this is for incoming call, build an answer SDP as mysdp based on offer SDP from request
-            offer = yoursdp or SDP(request.body) 
+            offer = yoursdp or SDP(request.body)
             net = [NetworkClass(app=None, src=(listen_ip, 0)) for i in xrange(len(streams))] # create as many network objects as we have streams
             for m, n in zip(streams, net): m.port = n.src[1]           # update port numbers in streams. TODO: need to add RTCP port if different than RTP+1
             netoffer = dict(map(lambda x: (x.src[1], x), net))           # create a table of RTP port=>network
@@ -683,7 +683,7 @@ class MediaSession(object):
                 self.setRemote(offer) # set the remote SDP which also sets the dest ip:port in net
         else:
             if _debug: print 'request does not have SDP body'
-            
+
     def hold(self, value): # enable/disable hold mode.
         ip = []
         for i in self.net:
@@ -698,7 +698,7 @@ class MediaSession(object):
         for m, i in zip(self.mysdp['m'], ip):
             if m['c']: m['c'].address = i if not value else '0.0.0.0'
         self.is_hold = value
-        
+
     def setRemote(self, sdp):
         '''Update the RTP network's destination ip:port based on remote SDP. It also creates RTP Session if 
         needed. This is implicitly invoked in constructor for incoming call, since remote SDP is already 
@@ -730,31 +730,31 @@ class MediaSession(object):
             for rtp in self.rtp: rtp.net = None; rtp.stop() # clean previous RTP session
             self.rtp[:] = map(lambda n: RTPSession(app=self), netvalid)
             for r, n in zip(self.rtp, netvalid): r.net = n; n.app = r; r.start() # attach net with session
-        
+
     def close(self):
         '''Clean up the media session. This must be called to clean up sockets, tasks, etc.'''
         for rtp in self.rtp: rtp.net = None; rtp.stop()
-        for net in filter(lambda x: x is not None, self.net): net.app = None; net.close() 
+        for net in filter(lambda x: x is not None, self.net): net.app = None; net.close()
         self.rtp[:], self.net[:] = [], []
 
     def hasType(self, type):
         '''Whether the media with the given type exists in both mysdp and yoursdp? Type can be 'audio' or 'video'.'''
-        return type.lower() in self._types 
-        
+        return type.lower() in self._types
+
     def createTimer(self, app): # Callback to create a timer object.
         return Timer(app)
-    
+
     def received(self, member, packet): # an RTP packet is received. Hand over to sip_data.
         if self.app and hasattr(self.app, 'received') and callable(self.app.received) and not self.is_hold:
             self.app.received(media=self, fmt=self._getMyFormat(packet.pt), packet=packet)
-    
+
     def send(self, payload, ts, marker, fmt):
         fy, rtp = self._getYourFormat(fmt)
         if rtp and fy: rtp.send(payload=payload, ts=ts, marker=marker, pt=int(fy.pt))
         elif _debug: print 'could not find RTP session for fmt=%r/%r'%(fmt.name, fmt.rate)
-        
+
     def _getMyFormat(self, pt): # returns matching fmt for this pt in mysdp
-        if self.mysdp: 
+        if self.mysdp:
             for m in self.mysdp['m']:
                 for f in m.fmt:
                     if str(f.pt) == str(pt): return f
@@ -769,7 +769,7 @@ class MediaSession(object):
                             or fmt.pt >= 0 and fmt.pt < 96 and fmt.pt == f.pt, m.fmt)
                 if fy: return (fy[0], rtp[0] if rtp else None)
         return (None, None)
-        
+
     def hasYourFormat(self, fmt): # check whether the fmt is available in yoursdp
         if self.yoursdp:
             for m in filter(lambda x: x.port > 0, self.yoursdp['m']):
@@ -777,7 +777,7 @@ class MediaSession(object):
                             or fmt.pt >= 0 and fmt.pt < 96 and fmt.pt == f.pt, m.fmt)
                 if fy: return True
         return False
-        
+
 #-------------------------- Session ---------------------------------------
 
 class Session(object):
@@ -787,7 +787,7 @@ class Session(object):
         self.user, self.dest = user, dest
         self.ua = self.mediasock = self.local = self.remote = self.gen = self.remotemediaaddr = self.media = None
         self._queue = multitask.Queue()
-        
+
     def start(self, outgoing):
         '''A generator function to initiate the connectivity check and then start the run
         method to receive messages on this ua.'''
@@ -795,7 +795,7 @@ class Session(object):
             yield self._checkconnectivity(outgoing)
         self.gen = self._run()
         multitask.add(self.gen)
-        
+
     def send(self, message):
         if self.ua:
             ua = self.ua
@@ -804,11 +804,11 @@ class Session(object):
             m.body = str(message)
             ua.sendRequest(m)
         yield # I don't wait for response 
-    
+
     def recv(self, timeout=None):
         cmd, arg = yield self._queue.get(timeout=timeout)
         raise StopIteration((cmd, arg))
-    
+
     def close(self, outgoing=True):
         '''Close the call and terminate any generators.'''
         self.mediasock = self.local = self.remote = self.media = None
@@ -824,7 +824,7 @@ class Session(object):
             self.ua.queue = None
             self.ua.close()  # this will remove dialog if needed
             self.ua = None
-    
+
     def _run(self):
         '''Thread method for this multitask task.'''
         try:
@@ -834,10 +834,10 @@ class Session(object):
                     yield self._receivedRequest(message)
                 else: # response
                     yield self._receivedResponse(message)
-        except GeneratorExit: 
+        except GeneratorExit:
             self.gen = None
             self.ua.queue = multitask.Queue() # this is needed because the queue gets corrupted when generator is closed
-           
+
     def _receivedRequest(self, request):
         '''Callback when received an incoming request.'''
         if _debug: print 'session receivedRequest', request.method, 'ua=', self.ua
@@ -855,13 +855,13 @@ class Session(object):
             m = ua.createResponse(405, 'Method not allowed in session')
             m.Allow = sip.Header('INVITE, ACK, CANCEL, BYE', 'Allow')
             ua.sendResponse(m)
-    
+
     def _receivedResponse(self, response):
         '''Callback when received an incoming response.'''
         if _debug: print 'session receivedResponse', response.response, 'ua=', self.ua
         method = response.CSeq.method
         if _debug: print 'Ignoring response ', response.response, 'of', method
-    
+
     def _checkconnectivity(self, outgoing):
         '''Check media connectivity using ICE-style checks on mediasock. After it is done
         it returns 'connected' from register()'''
@@ -885,7 +885,7 @@ class Session(object):
                 except multitask.Timeout:
                     retry = retry-1
                     continue
-                
+
                 if _debug: print 'received from', remote, 'response=', response
                 #talk.mediasock.connect(remote) # connect the UDP socket to that address
                 if response == 'request':
@@ -895,7 +895,7 @@ class Session(object):
                 break # connectivity check is completed
         except:
             if _debug: print '_checkconnectivity() exception', (sys and sys.exc_info() or None)
-            
+
     def _receivedReInvite(self, request): # only accept re-invite if no new media stream.
         if not self.media or not hasattr(self.media, 'mysdp') or not hasattr(self.media, 'yoursdp') or not hasattr(self.media, 'setRemote'):
             self.ua.sendResponse(501, 'Re-INVITE Not Supported')
@@ -914,17 +914,17 @@ class Session(object):
 
     def hold(self, value): # send re-INVITE with SDP ip=0.0.0.0
         if self.media and hasattr(self.media, 'hold') and hasattr(self.media, 'mysdp'):
-            self.media.hold(value); 
+            self.media.hold(value);
             self.change(self.media.mysdp)
         else: raise ValueError('No media attribute found')
-        
+
     def change(self, mysdp):
         if self.ua:
             m = self.ua.createRequest('INVITE')
             m['Content-Type'] = sip.Header('application/sdp', 'Content-Type')
             m.body = str(mysdp)
             self.ua.sendRequest(m)
-        
+
 class Presence(object):
     '''The Presence object represents a single subscribe dialog between local user and remote
     contact.'''
@@ -932,14 +932,14 @@ class Presence(object):
         self.user, self.dest = user, dest
         self.ua = self.gen = None
         self._queue = multitask.Queue()
-        
+
     def start(self, outgoing):
         '''A generator function to initiate the connectivity check and then start the run
         method to receive messages on this ua.'''
         self.gen = self._run()
         multitask.add(self.gen)
-        yield 
-    
+        yield
+
     def status(self, status):
         '''Update my presence status to the remote.'''
         if self.ua:
@@ -949,11 +949,11 @@ class Presence(object):
             m.body = str(status) # TODO: update this to send NOTIFY or PUBLISH
             ua.sendRequest(m)
         yield # I don't wait for response 
-    
+
     def recv(self, timeout=None):
         cmd, arg = yield self._queue.get(timeout=timeout)
         raise StopIteration((cmd, arg))
-    
+
     def close(self, outgoing=True):
         '''Close the call and terminate any generators.'''
         self.local = self.remote = None # do not clear mediasock yet
@@ -968,7 +968,7 @@ class Presence(object):
             self.ua.queue = None
             self.ua.close()  # this will remove dialog if needed
             self.ua = None
-    
+
     def _run(self):
         '''Thread method for this multitask task.'''
         try:
@@ -978,10 +978,10 @@ class Presence(object):
                     yield self._receivedRequest(message)
                 else: # response
                     yield self._receivedResponse(message)
-        except GeneratorExit: 
+        except GeneratorExit:
             self.gen = None
             self.ua.queue = multitask.Queue()
-            
+
     def _receivedRequest(self, request):
         '''Callback when received an incoming request.'''
         ua = self.ua
@@ -997,12 +997,12 @@ class Presence(object):
             m = ua.createResponse(405, 'Method not allowed in session')
             m.Allow = sip.Header('INVITE, ACK, CANCEL, BYE', 'Allow')
             ua.sendResponse(m)
-    
+
     def _receivedResponse(self, response):
         '''Callback when received an incoming response.'''
         method = response.CSeq.method
         if _debug: print 'Ignoring response ', response.response, 'of', method
-    
+
 #------------------------------ Conf --------------------------------------
 
 '''
@@ -1100,7 +1100,7 @@ header.
 class Member(object):
     def __init__(self, address, tag=None, state='pending'):
         self.address, self.tag, self.state, self.session = address, tag, state, None
-        
+
 class Conf(object):
     '''A conference object that is used for communication between a User and one or more
     Contact.'''
@@ -1109,10 +1109,10 @@ class Conf(object):
         self.originator = None
         self.tag = str(random.randint(0, 2**32))
         self.members = [] # TODO: use a better data structure like set or map indexed by tag as well as address
-        
+
     def __repr__(self):
         print '<Conf name=%s id=%s user=%s members=%d>'%(self.name, self.id, self.user.address, len(self.members))
-        
+
     def find(self, addrortag):
         '''Find a Member with the given address or tag.'''
         if isinstance(addrortag, Address):
@@ -1124,69 +1124,69 @@ class Conf(object):
                 if member.tag == addrortag:
                     return member
         return None
-    
+
     def invite(self, dest):
         '''Invite a destination user in the conference. The method is similar to User.connect.'''
         dest, user = Address(str(dest)), self.user
-        
+
         if self.find(dest): # if it is already a member, don't invite again
             raise StopIteration((None, '400 Already a conference member'))
-        
+
         member = Member(address=dest)
         self.members.append(member)
-        
+
         ua = user.createClient(dest)
         ua.queue = multitask.Queue() # to receive responses
         m = ua.createRequest('INVITE')
-        
+
         #local = yield self._getLocalCandidates(mediasock) # populate the media candidates
         #for c in local: # add proprietary SIP header - Candidate
         #    m.insert(sip.Header(c[0] + ':' + str(c[1]), 'Candidate'), True)
         m['Conf-ID'] = sip.Header(str(self.id), 'Conf-ID')
         m['Conf-ID']['from'] = self.tag
- 
+
         ua.autoack = False
         ua.sendRequest(m)
-        
+
         while True:
             response = yield ua.queue.get()
             if response.is2xx: # success
                 ua = hasattr(ua, 'dialog') and ua.dialog or ua # update ua if needed
-                    
+
                 session = Session(user=self, dest=dest)
                 session.ua = ua
                 #session.mediasock = mediasock
                 #session.local = local
                 #session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in response.all('Candidate')] # store remote candidates 
-                
+
                 if response['Conf-ID']:  # remote supports conference
                     member.tag = response['Conf-ID']['from']
                     member.state = 'established'
-                    
+
                 m = ua.createRequest('ACK') # send a ACK
                 self._populateMessage(m, member.tag)
                 ua.sendRequest(m) # send the request
-                
+
                 toinvite = self.remaining(response)
                 if toinvite:
                     multitask.add(self.connect(toinvite)) # connect to those members if needed
-                
+
                 yield session.start(True)
                 member.session = session
                 raise StopIteration((member, None))
             elif response.isfinal: # some failure
                 self.members.remove(member)
                 raise StopIteration((None, str(response.response) + ' ' + response.responsetext))
-        
+
     def connect(self, members):
         for member in members:
             if member.address.uri != self.address.uri and member.tag != self.tag and not self.find(member.tag) and member.state == 'pending':
                 self.members.append(member)
-                
+
                 ua = self.user.createClient(member.address)
                 ua.queue = multitask.Queue() # to receive responses
                 m = ua.createRequest('INVITE')
-                
+
                 #local = yield self._getLocalCandidates(mediasock) # populate the media candidates
                 #for c in local: # add proprietary SIP header - Candidate
                 #    m.insert(sip.Header(c[0] + ':' + str(c[1]), 'Candidate'), True)
@@ -1194,25 +1194,25 @@ class Conf(object):
                 m['Conf-ID']['from'] = self.tag
                 m['Invited-By'] = sip.Header(self.originator and str(self.originator.address) or str(self.address), 'Invited-By')
                 m['Invited-By']['tag'] = self.originator and self.originator.tag or self.tag
-         
+
                 ua.autoack = False
                 ua.sendRequest(m)
-                
+
                 while True:
                     response = yield ua.queue.get()
                     if response.is2xx: # success
                         ua = hasattr(ua, 'dialog') and ua.dialog or ua # update ua if needed
-                            
+
                         session = Session(user=self, dest=member.address)
                         session.ua = ua
                         #session.mediasock = mediasock
                         #session.local = local
                         #session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in response.all('Candidate')] # store remote candidates 
-                        
+
                         if response['Conf-ID']:  # remote supports conference
                             member.tag = response['Conf-ID']['from']
                             member.state = 'established'
-                            
+
                         m = ua.createRequest('ACK') # send a ACK
                         self._populateMessage(m, member.tag)
                         ua.sendRequest(m) # send the request
@@ -1220,22 +1220,22 @@ class Conf(object):
                         toinvite = self.remaining(response)
                         if toinvite:
                             multitask.add(self.connect(toinvite)) # connect to those members if needed
-                        
+
                         yield session.start(True)
                         member.session = session
                         raise StopIteration((member, None))
                     elif response.isfinal: # some failure
                         self.members.remove(member)
                         raise StopIteration((None, str(response.response) + ' ' + response.responsetext))
-                        
+
     def remaining(self, response):
         toinvite = []
         for mem in response.all('Conf-Member'): # for each Conf-Member in response
             if ('state' not in mem or mem['state'] == 'established') and not self.find(mem.tag):
-                toinvite.append(Member(address=Address(mem.value), tag=mem.tag))  
+                toinvite.append(Member(address=Address(mem.value), tag=mem.tag))
         return toinvite
-    
-    def _populateMessage(self, m, desttag=None): 
+
+    def _populateMessage(self, m, desttag=None):
         '''Populate the message with local headers.'''
         m['Conf-ID'] = sip.Header(str(self.id), 'Conf-ID')
         m['Conf-ID']['from'] = self.tag
@@ -1246,7 +1246,7 @@ class Conf(object):
                 hdr['tag'] = mem.tag
                 m.insert(hdr, append=True)
         return m
-    
+
     def accept(self, arg):
         '''Accept an incoming invitation (dest, ua) or connect in this conference.'''
         try:
@@ -1256,7 +1256,7 @@ class Conf(object):
                 raise StopIteration((None, '400 Invalid to parameter in Conf-ID'))
             elif not request['Conf-ID']['from']:
                 raise StopIteration((None, '400 Missing from parameter in Conf-ID'))
-    
+
             tag = request['Conf-ID']['from']
             member = self.find(tag)
             if not member: # not already found by tag
@@ -1272,7 +1272,7 @@ class Conf(object):
                     raise StopIteration((None, 'Already a member'))
                 elif member.state == 'pending' and self.address.uri < member.address.uri:
                     raise StopIteration((None, '400 Simultaneous invitations'))
-                
+
             if request['Invited-By']: # a connect
                 if not self.find(request['Invited-By']['tag']): # not found
                     raise StopIteration((None, '400 Invalid Invited-By header'))
@@ -1281,24 +1281,24 @@ class Conf(object):
                 self.originator = member
                 self.members.append(member)
             raise StopIteration((member, None))
-            
+
         except StopIteration, E: # send response and receive ACK before re-raising
             if E[0][0]:  # member is present, accept
                 member = E[0][0]
                 if isinstance(member, Member):
                     if _debug: print 'NOT A MEMBER', type(member)
-                     
+
                 m = ua.createResponse(200, 'OK')
                 ua.queue = multitask.Queue()
-                
+
                 #local = yield self._getLocalCandidates(mediasock)
                 #for c in local: # add proprietary SIP header - Candidate
                 #    m.insert(sip.Header(c[0] + ':' + str(c[1]), 'Candidate'), True)
-                    
+
                 self._populateMessage(m, member.tag)
                 ua.sendResponse(m)
                 ua = hasattr(ua, 'dialog') and ua.dialog or ua
-                
+
                 try:
                     while True:
                         request = yield ua.queue.get(timeout=5) # wait for 5 seconds for ACK
@@ -1308,31 +1308,31 @@ class Conf(object):
                             #session.mediasock = mediasock
                             #session.local = local
                             #session.remote= [(x.value.split(':')[0], int(x.value.split(':')[1])) for x in ua.request.all('Candidate')] # store remote candidates 
-                            
+
                             yield session.start(False)
                             if member.state == 'pending': member.state = 'established'
                             member.session = session
-                            
+
                             toinvite = self.remaining(request)
                             if toinvite:
                                 multitask.add(self.connect(toinvite)) # connect to those members if needed
-                                
+
                             raise StopIteration((member, None))
                 except multitask.Timeout: pass
                 except GeneratorExit: pass
-                
+
                 self.members.remove(member)
                 raise StopIteration((None, 'didnot receive ACK'))
-            
+
             else: # failure response
                 code, sep, rest = E[0][1] and E[0][1].partition(' ') or (200, '', 'OK')
                 code = int(code)
                 ua.sendResponse(ua.createResponse(code, rest))
                 raise # re-raise Stop iteration exception for failure
-        
+
     def recv(self):
         '''Receive any membership change events.'''
-        
+
     def close(self):
         '''Close the conference by sending BYE to all the active members.'''
         for member in self.members:
@@ -1342,7 +1342,7 @@ class Conf(object):
                 member.session = None
                 member.state = 'closed'
         self.members[:] = [] # clear the members
-                
+
 #------------------------- Unit test --------------------------------------
 
 def testRegister():
@@ -1357,7 +1357,7 @@ def testRegister():
     print 'user.close() returned', result, reason
     user.stop()
     sock.close()
-    
+
 
 def testOutgoing(user, dest):
     msock = socket.socket(type=socket.SOCK_DGRAM)
@@ -1377,7 +1377,7 @@ def testOutgoing(user, dest):
         yield multitask.sleep(3) # wait before exiting
     else:
         print 'call failed', reason
-        
+
 def testIncoming(user):
     while True:
         cmd, arg = (yield user.recv())
@@ -1388,7 +1388,7 @@ def testIncoming(user):
             yourself, arg = yield user.accept(arg, msock)
             if not yourself:
                 print 'cannot accept call', arg
-                
+
             while True:
                 try:
                     data, remote = yield multitask.recvfrom(msock, 1500, timeout=3)
@@ -1409,20 +1409,20 @@ def testCall():
     sock1 = socket.socket(type=socket.SOCK_DGRAM)
     sock1.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock1.bind(('0.0.0.0', 5062)) # use port 5062 for kundansingh99@iptel.org
-    
+
     sock2 = socket.socket(type=socket.SOCK_DGRAM)
     sock2.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock2.bind(('0.0.0.0', 5060)) # use port 5060 for kundan@iptel.org
-    
+
     user1 = User(sock1).start()
     user1.address = Address('"Kundan Singh" <sip:kundansingh99@iptel.org>')
     user1.username, user1.password = 'kundansingh99', 'mypass'
-    result, reason = yield user1.bind(user1.address) 
-    
+    result, reason = yield user1.bind(user1.address)
+
     user2 = User(sock2).start()
     user2.address = Address('"Kundan" <sip:kundan@iptel.org>')
     user2.username, user2.password = 'kundan', 'mypass'
-    
+
     multitask.add(testIncoming(user1))
     yield multitask.sleep(2)
 
@@ -1430,7 +1430,7 @@ def testCall():
 
     yield user1.stop()
     yield user2.stop()
-    
+
 def testConf():
     data = [(5060, '"User1" <sip:user1@localhost:5060>', 'user1', 'passwd1'), \
             (5062, '"User2" <sip:user2@localhost:5062>', 'user2', 'passwd2'), \
@@ -1463,13 +1463,13 @@ def testConf():
                         multitask.add(sessionlistener(member.session))
                 elif cmd == 'confconnect':
                     if conf:
-                        member, reason = yield conf.accept(arg) 
+                        member, reason = yield conf.accept(arg)
                         if member:
                             multitask.add(sessionlistener(member.session))
-                        
-                    
+
+
         multitask.add(listener(user))
-        
+
     conf = Conf(name='sip:conf@iptel.org', id=str(random.randint(0, 2**32)), user=users[0]) # first user hosts the conference
     for user in users[1:]: # and invites other users
         yield multitask.sleep(2) # wait before inviting a participant
