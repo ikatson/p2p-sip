@@ -1,0 +1,10 @@
+*.pyc
+*.pot
+*~
+.ropeproject
+\#*
+.#*
+.hg
+*.orig
+*.DS_Store
+.idea/
