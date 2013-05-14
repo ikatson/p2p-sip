@@ -14,7 +14,9 @@ from p2psip.std.rfc2396 import isIPv4, isMulticast, isLocal, isPrivate, URI, Add
 from p2psip.std.rfc2617 import createAuthorization
 from socket import gethostbyname # TODO: should replace with getifaddr, SRV, NAPTR or similar
 
-_debug = False
+import logging
+
+log = logging.getLogger(__name__)
 
 #----------------------- Header and Message -------------------------------
 
@@ -131,17 +133,16 @@ class Header(object):
                 if n:
                     yield (n, v)
         except:
-            if _debug: print 'error parsing parameters'; traceback.print_exc()
+            log.exception('error parsing parameters')
         raise StopIteration(None)
 
-    
     def __str__(self):
         '''Return a string representation of the header value.'''
         # TODO: use reduce instead of join+map
         name = self.name.lower()
         rest = '' if ((name in _comma) or (name in _unstructured)) \
                 else (';'.join(['%s'%(x,) if not y else ('%s=%s'%(x.lower(), y) if re.match(r'^[a-zA-Z0-9\-_\.=]*$', str(y)) else '%s="%s"'%(x.lower(), y))for x, y in self.__dict__.iteritems() if x.lower() not in ('name','value', '_viauri')]))
-        return str(self.value) + (rest and (';'+rest) or '');
+        return str(self.value) + (rest and (';'+rest) or '')
     
     def __repr__(self):
         '''Return the string representation of header's "name: value"'''
@@ -267,7 +268,7 @@ class Message(object):
                     if not isinstance(self[name],list): self[name] = [self[name]]
                     self[name] += values
             except:
-                if _debug: print 'error parsing', h 
+                log.exception('error parsing %s', h)
                 continue
         bodyLen = int(self['Content-Length'].value) if 'Content-Length' in self else 0
         if body: self.body = body
@@ -356,7 +357,6 @@ class Message(object):
         m.method, m.uri, m.protocol = method, URI(uri), 'SIP/2.0'
         Message._populateMessage(m, headers, content)
         if m.CSeq != None and m.CSeq.method != method: m.CSeq = Header(str(m.CSeq.number) + ' ' + method, 'CSeq')
-        #if _debug: print 'createRequest returned\n', m 
         return m
     
     @staticmethod
@@ -495,8 +495,7 @@ class Stack(object):
                 self._receivedResponse(m, uri)
             else: raise ValueError, 'Received invalid message'
         except ValueError, E: # TODO: send 400 response to non-ACK request
-            if _debug: print 'Error in received message:', E
-            if _debug: traceback.print_exc()
+            log.exception('Error in received message:')
             if m.method and m.uri and m.protocol and m.method != 'ACK': # this was a non-ACK request
                 try: self.send(Message.createResponse(400, str(E), None, None, m))
                 except: pass # ignore error since m may be malformed.                
@@ -506,9 +505,9 @@ class Stack(object):
             uri = m.first('Contact').value.uri
             if uri.scheme in ('sip', 'sips') and isIPv4(uri.host) and uri.host != src[0] and \
             not isLocal(src[0]) and not isLocal(uri.host) and isPrivate(uri.host) and not isPrivate(src[0]):
-                if _debug: print 'fixing NAT -- private contact from', uri,
+                log.debug('fixing NAT -- private contact from %s', uri)
                 uri.host, uri.port = src[0], src[1]
-                if _debug: print 'to received', uri
+                log.debug('to received %s', uri)
                 
     def _receivedRequest(self, r, uri):
         '''Received a SIP request r (Message) from the uri (URI).'''
@@ -538,18 +537,18 @@ class Stack(object):
                             self.send(Message.createResponse(481, 'Dialog does not exist', None, None, r))
                             return
                     else: # hack to locate original t for ACK
-                        if _debug: print 'no dialog for ACK, finding transaction'
+                        log.debug('no dialog for ACK, finding transaction')
                         if not t and branch != '0': t = self.findTransaction(Transaction.createId(branch, 'INVITE'))
                         if t and t.state != 'terminated':
-                            if _debug: print 'Found transaction', t
+                            log.debug('Found transaction %s', t)
                             t.receivedRequest(r)
                             return
                         else: 
-                            if _debug: print 'No existing transaction for ACK'
+                            log.debug('No existing transaction for ACK')
                             u = self.createServer(r, uri)
                             if u: app = u
                             else: 
-                                if _debug: print 'Ignoring ACK without transaction'
+                                log.debug('Ignoring ACK without transaction')
                                 return
                 else: # dialog found
                     app = d
@@ -606,7 +605,7 @@ class Stack(object):
                 else: 
                     d.receivedResponse(None, r)
             else:
-                if _debug: print 'transaction id %r not found'%(Transaction.createId(branch, method),) # do not print the full transactions table
+                log.debug('transaction id %r not found', (Transaction.createId(branch, method),))  # do not print the full transactions table
                 if method == 'INVITE' and r.isfinal: # final failure response for INVITE, send ACK to same transport
                     # TODO: check if this following is as per the standard
                     m = Message.createRequest('ACK', str(r.To.value.uri))
@@ -663,7 +662,7 @@ class Transaction(object):
         '''Stop the timers and remove from the lists.'''
         self.stopTimers()
         if self.stack:
-            if _debug: print 'closing transaction %r'%(self.id,)
+            log.debug('closing transaction %r', self.id)
             if self.id in self.stack.transactions: del self.stack.transactions[self.id]
 
     def state():
@@ -1099,13 +1098,13 @@ class UserAgent(object):
             if len(routes) > 0:
                 target = routes[0].value.uri
                 if not target or 'lr' not in target.param: # strict route
-                    if _debug: print 'strict route target=', target, 'routes=', routes
+                    log.debug('strict route target=%s routes=%s', target, routes)
                     del routes[0] # ignore first route
                     if len(routes) > 0:
-                        if _debug: print 'appending our route'
+                        log.debug('appending our route')
                         routes.append(Header(str(request.uri), 'Route'))
                     request.Route = routes
-                    request.uri = target;
+                    request.uri = target
         
         # TODO: remove any Route header in REGISTER request
         
@@ -1149,7 +1148,7 @@ class UserAgent(object):
     def receivedResponse(self, transaction, response):
         '''Received a new response from the transaction.'''
         if transaction and transaction != self.transaction:
-            if _debug: print 'Invalid transaction received %r!=%r'%(transaction, self.transaction)
+            log.debug('Invalid transaction received %r!=%r', transaction, self.transaction)
             return
         if len(response.all('Via')) > 1:
             raise ValueError, 'More than one Via header in response'
@@ -1260,7 +1259,7 @@ class UserAgent(object):
     def timeout(self, transaction):
         '''A client transaction was timedout.'''
         if transaction and transaction != self.transaction: # invalid transaction
-            if _debug: print 'invalid transaction in timeout() %r != %r'%(transaction, self.transaction)
+            log.debug('invalid transaction in timeout() %r != %r', transaction, self.transaction)
             return
         self.transaction = None 
         if not self.server: # UAC
@@ -1325,7 +1324,7 @@ class Dialog(UserAgent):
         d.request = request
         d.routeSet = request.all('Record-Route') if request['Record-Route'] else None
         while d.routeSet and isMulticast(d.routeSet[0].value.uri.host): # remove any multicast address from top of the list.
-            if _debug: print 'deleting top multicast routeSet', d.routeSet[0]
+            log.debug('deleting top multicast routeSet %s', d.routeSet[0])
             del d.routeSet[0]
             if len(d.routeSet) == 0: d.routeSet = None 
         d.secure = request.uri.secure
@@ -1333,7 +1332,7 @@ class Dialog(UserAgent):
         d.callId = request['Call-ID'].value
         d.localTag, d.remoteTag = response.To['tag'] or '', request.From['tag'] or ''
         d.localParty, d.remoteParty = Address(str(request.To.value)), Address(str(request.From.value))
-        if _debug: print 'request contact', request.Contact
+        log.debug('request contact %s', request.Contact)
         if request.Contact: d.remoteTarget = URI(str(request.first('Contact').value.uri))
         # TODO: retransmission timer for 2xx in UAC
         stack.dialogs[d.id] = d
@@ -1412,7 +1411,7 @@ class Dialog(UserAgent):
     def sendCancel(self):
         '''Send a CANCEL request for the first pending client transaction.'''
         if len(self.clients) == 0: 
-            if _debug: print 'No client transaction to send cancel'
+            log.debug('No client transaction to send cancel')
             return
         self.transaction, self.request = self.clients[0], self.clients[0].request
         UserAgent.sendCancel(self)
@@ -1421,7 +1420,7 @@ class Dialog(UserAgent):
     def receivedRequest(self, transaction, request):
         '''Incoming request in the dialog.'''
         if self.remoteSeq != 0 and request.CSeq.number < self.remoteSeq:
-            if _debug: print 'Dialog.receivedRequest() CSeq is old', request.CSeq.number, '<', self.remoteSeq
+            log.debug('Dialog.receivedRequest() CSeq is old', request.CSeq.number, '<', self.remoteSeq)
             self.sendResponse(500, 'Internal server error - invalid CSeq')
             return
         self.remoteSeq = request.CSeq.number
@@ -1567,13 +1566,13 @@ class Proxy(UserAgent):
             if len(routes) > 0:
                 target = routes[0].value.uri
                 if not target or 'lr' not in target.param: # strict route
-                    if _debug: print 'strict route target=', target, 'routes=', routes
+                    log.debug('strict route target=%s routes=%s', target, routes)
                     del routes[0] # ignore first route
                     if len(routes) > 0:
-                        if _debug: print 'appending our route'
+                        log.debug('appending our route')
                         routes.append(Header(str(request.uri), 'Route'))
                     request.Route = routes
-                    request.uri = target;
+                    request.uri = target
         
         self.stack.sending(self, request) 
         
@@ -1621,7 +1620,7 @@ class Proxy(UserAgent):
         '''Received a new response from the transaction.'''
         branch = self.getBranch(transaction)
         if not branch:
-            if _debug: print 'Invalid transaction received %r'%(transaction)
+            log.debug('Invalid transaction received %r', transaction)
             return
         if response.is1xx and branch.cancelRequest:
             cancel = Transaction.createClient(self.stack, self, branch.cancelRequest, transaction.transport, transaction.remote)
@@ -1638,7 +1637,7 @@ class Proxy(UserAgent):
     def sendResponseIfPossible(self):
         branches = filter(lambda x: x.response and x.response.isfinal, self.branches)
         branches2xx = filter(lambda x: x.response.is2xx, branches)
-        if _debug: print 'received %d responses out of %d'%(len(branches), len(self.branches))
+        log.debug('received %d responses out of %d', len(branches), len(self.branches))
         response = None
         if branches2xx: response = branches[0].response
         elif len(branches) == len(self.branches): response = branches[0].response # TODO select best instead of first 
@@ -1675,7 +1674,7 @@ class Proxy(UserAgent):
                 response = Message.createResponse(503, 'Service unavailable - ' + error, None, None, self.request)
                 return self.sendResponse(response)
             else:
-                if _debug: print 'warning: dropping ACK:', error
+                log.debug('warning: dropping ACK:%s', error)
         branch = self.getBranch(transaction)
         if not branch:  return # invalid transaction
         self.transaction = None

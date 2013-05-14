@@ -211,6 +211,9 @@ for simple applications.
 '''
 
 from __future__ import with_statement
+
+import logging
+
 from contextlib import closing
 from p2psip.std.kutil import Timer, getlocaladdr, getintfaddr
 from p2psip.std.rfc2396 import URI, Address
@@ -222,7 +225,9 @@ from p2psip.std import rfc3550
 import p2psip.std.rfc3489bis as stun
 import sys, traceback, socket, multitask, random
 
-_debug = False  # set this to True to display all the debug messages.
+
+log = logging.getLogger(__name__)
+
 
 class User(object):
     '''The User object provides a layer between the application and the SIP stack.'''
@@ -237,7 +242,7 @@ class User(object):
         self.stack = sip.Stack(self, self.transport) # create a SIP stack instance
         self.reg = None   # registration UAC
 
-        if _debug: print 'User created on listening=', sock.getsockname(), 'advertised=', self.sockaddr
+        log.debug('User created on listening= %s %s %s', sock.getsockname(), 'advertised=', self.sockaddr)
         if start:
             self.start()
 
@@ -278,12 +283,14 @@ class User(object):
             while self.sock and self.stack:
                 try:
                     data, remote = (yield multitask.recvfrom(self.sock, maxsize, timeout=interval))
-                    if _debug: print 'received[%d] from %s\n%s'%(len(data),remote,data)
+                    log.debug('received[%d] from %s\n%s', len(data), remote, data)
                     self.stack.received(data, remote)
                 except multitask.Timeout: pass
         except GeneratorExit: pass
-        except: print 'User._listener exception', (sys and sys.exc_info() or None); traceback.print_exc(); raise
-        if _debug: print 'terminating User._listener()'
+        except:
+            log.exception('User._listener exception')
+            raise
+        log.debug('terminating User._listener()')
 
     def _natcheck(self, interval):
         '''Periodically discover the NAT behavior. Default interval is every 3 min (180s).
@@ -291,11 +298,13 @@ class User(object):
         try:
             while self.sock:
                 self.nattype, self.mapping, self.filtering, self.external = yield stun.discoverBehavior()
-                if _debug: print 'nattype=', self.nattype, 'external=', self.external
+                log.debug('nattype= %s %s %s', self.nattype, 'external=', self.external)
                 yield multitask.sleep(interval)
-        except GeneratorExit: pass
-        except: print 'User._natcheck exception', (sys and sys.exc_info() or None)
-        if _debug: print 'terminating User._natcheck()'
+        except GeneratorExit:
+            pass
+        except:
+            log.exception('User._natcheck exception')
+        log.debug('terminating User._natcheck()')
 
 
     #-------------------- binding related ---------------------------------
@@ -320,8 +329,9 @@ class User(object):
         reg = self.reg = self.createClient(setProxyUser=False)
         reg.queue = multitask.Queue()
         result, reason = (yield self._bind(interval=interval, refresh=refresh, wait=False))
-        if _debug: print 'received response', result
-        if result == 'failed': self.reg = None
+        log.debug('received response %s', result)
+        if result == 'failed':
+            self.reg = None
         raise StopIteration((result, reason))
 
     def close(self):
@@ -475,7 +485,7 @@ class User(object):
 
     def _getLocalCandidates(self, mediasock):
         local = [getlocaladdr(mediasock)] # first element is local-addr
-        if _debug: print 'getting local candidates for nattype=', self.nattype
+        log.debug('getting local candidates for nattype %s', self.nattype)
         if self.nattype == 'good' or self.nattype == 'bad' or self.nat and (self.nattype is None): # get STUN address for media
             response, external = yield stun.request(mediasock)
             local.append(external)
@@ -522,7 +532,7 @@ class User(object):
         queue and gen in the UAS.'''
         ua = request.method in ['INVITE', 'BYE', 'ACK', 'SUBSCRIBE', 'MESSAGE', 'NOTIFY'] and sip.UserAgent(self.stack, request) or None
         if ua: ua.queue = ua.gen = None
-        if _debug: print 'createServer', ua
+        log.debug('createServer %s', ua)
         return ua
 
     def createClient(self, dest=None, setProxyUser=True):
@@ -534,7 +544,7 @@ class User(object):
         ua.remoteTarget= dest and dest.uri.dup() or self.address and self.address.uri.dup() or None
         ua.routeSet    = self.proxy and [sip.Header(str(self.proxy), 'Route')] or None
         if setProxyUser and ua.routeSet and not ua.routeSet[0].value.uri.user: ua.routeSet[0].value.uri.user = ua.remoteParty.uri.user
-        if _debug: print 'createClient', ua
+        log.debug('createClient %s', ua)
         return ua
 
     def sending(self, ua, message, stack):
@@ -543,7 +553,9 @@ class User(object):
     def receivedRequest(self, ua, request, stack):
         '''Callback when received an incoming request.'''
         def _receivedRequest(self, ua, request): # a generator version
-            if _debug: print 'receivedRequest method=', request.method, 'ua=', ua, ' for ua', (ua.queue is not None and 'with queue' or 'without queue')
+            log.debug('receivedRequest method %s %s %s %s %s',
+                      request.method, 'ua=', ua, ' for ua',
+                      (ua.queue is not None and 'with queue' or 'without queue'))
             if hasattr(ua, 'queue') and ua.queue is not None:
                 yield ua.queue.put(request)
             elif request.method == 'INVITE':    # a new invitation
@@ -579,12 +591,12 @@ class User(object):
     def receivedResponse(self, ua, response, stack):
         '''Callback when received an incoming response.'''
         def _receivedResponse(self, ua, response): # a generator version
-            if _debug: print 'receivedResponse response=', response.response, ' for ua', (ua.queue is not None and 'with queue' or 'without queue')
+            log.debug('receivedResponse response %s %s %s', response.response, ' for ua', (ua.queue is not None and 'with queue' or 'without queue'))
             if hasattr(ua, 'queue') and ua.queue is not None: # enqueue it to the ua's queue
                 yield ua.queue.put(response)
-                if _debug: print 'response put in the ua queue'
+                log.debug('response put in the ua queue')
             else:
-                if _debug: print 'ignoring response', response.response
+                log.debug('ignoring response %s', response.response)
         multitask.add(_receivedResponse(self, ua, response))
 
     def cancelled(self, ua, request, stack):
@@ -600,7 +612,7 @@ class User(object):
         dialog.queue = ua.queue
         dialog.gen   = ua.gen
         ua.dialog = dialog
-        if _debug: print 'dialogCreated from', ua, 'to', dialog
+        log.debug('dialogCreated from %s to %s', ua, dialog)
         # else ignore this since I don't manage any dialog related ua in user
 
     def authenticate(self, ua, obj, stack):
@@ -616,29 +628,31 @@ class User(object):
     def send(self, data, addr, stack):
         '''Send data to the remote addr.'''
         def _send(self, data, addr): # generator version
-            if _debug: print 'sending[%d] to %s\n%s'%(len(data), addr, data)
+            log.debug('sending[%d] to %s\n%s', len(data), addr, data)
             if self.sock:
                 if self.sock.type == socket.SOCK_STREAM:
                     try:
                         remote = self.sock.getpeername()
                         if remote != addr:
-                            if _debug: print 'connected to wrong addr', remote, 'but sending to', addr
+                            log.debug(
+                                'connected to wrong addr %s but sending to %s',
+                                remote, addr)
                     except socket.error: # not connected, try connecting
                         try:
                             self.sock.connect(addr)
                         except socket.error:
-                            if _debug: print 'failed to connect to', addr
+                            log.debug('failed to connect to %s', addr)
                     try:
                         yield self.sock.send(data)
                     except socket.error:
-                        if _debug: print 'socket error in send'
+                        log.exception('socket error in send')
                 elif self.sock.type == socket.SOCK_DGRAM:
                     try:
                         yield self.sock.sendto(data, addr)
                     except socket.error:
-                        if _debug: print 'socket error in sendto'
+                        log.exception('socket error in sendto')
                 else:
-                    if _debug: print 'invalid socket type', self.sock.type
+                    log.debug('invalid socket type %s', self.sock.type)
         multitask.add(_send(self, data, addr))
 
 #-------------------- Media Session ---------------------------------------
@@ -669,7 +683,7 @@ class MediaSession(object):
             netoffer = dict(map(lambda x: (x.src[1], x), net))           # create a table of RTP port=>network
             answer = rfc3264.createAnswer(streams, offer)              # create the answered SDP now
             if not answer or not answer['m']:
-                if _debug: print 'create answer failed to create an answer'
+                log.debug('create answer failed to create an answer')
                 for n in net: n.close()
             else:
                 net1 = map(lambda m: netoffer[m.port] if m.port > 0 else None, answer['m']) # include networks which are successfully answered
@@ -682,7 +696,7 @@ class MediaSession(object):
                 self.mysdp, self.net[:] = answer, net1
                 self.setRemote(offer) # set the remote SDP which also sets the dest ip:port in net
         else:
-            if _debug: print 'request does not have SDP body'
+            log.debug('request does not have SDP body')
 
     def hold(self, value): # enable/disable hold mode.
         ip = []
@@ -720,9 +734,9 @@ class MediaSession(object):
                             ip0, n, found = m1['c'].address if m1['c'] else ip, net[i], True
                             n.dest, n.destRTCP = (ip0, m1.port), (ip0, m1.port+1 if m1.port > 0 else 0)
                     if not found:
-                        if _debug: print 'invalid m= line in answer', m1
+                        log.debug('invalid m= line in answer %s', m1)
         else:
-            if _debug: print 'missing m= line in remote SDP'
+            log.debug('missing m= line in remote SDP')
         for my in filter(lambda m: m.port > 0, self.mysdp['m'] if self.mysdp else []): # update _types based on mysdp and yoursdp
             for your in filter(lambda m: m.port > 0 and m.media == my.media, self.yoursdp['m'] if self.yoursdp else []): self._types.append(my.media)
         netvalid = filter(lambda x: x is not None, net)
@@ -750,15 +764,18 @@ class MediaSession(object):
 
     def send(self, payload, ts, marker, fmt):
         fy, rtp = self._getYourFormat(fmt)
-        if rtp and fy: rtp.send(payload=payload, ts=ts, marker=marker, pt=int(fy.pt))
-        elif _debug: print 'could not find RTP session for fmt=%r/%r'%(fmt.name, fmt.rate)
+        if rtp and fy:
+            rtp.send(payload=payload, ts=ts, marker=marker, pt=int(fy.pt))
+        else:
+            log.debug('could not find RTP session for fmt=%r/%r',
+                      fmt.name, fmt.rate)
 
     def _getMyFormat(self, pt): # returns matching fmt for this pt in mysdp
         if self.mysdp:
             for m in self.mysdp['m']:
                 for f in m.fmt:
                     if str(f.pt) == str(pt): return f
-        if _debug: print 'format not found for pt=', pt
+        log.debug('format not found for pt= %s', pt)
         return None
 
     def _getYourFormat(self, fmt): # returns (fmt, rtp) where fmt is matching format in yoursdp, and rtp is the associated session
@@ -768,7 +785,7 @@ class MediaSession(object):
                 fy = filter(lambda f:str(f.name).lower() == str(fmt.name).lower() and f.rate == fmt.rate and f.count == fmt.count
                             or fmt.pt >= 0 and fmt.pt < 96 and fmt.pt == f.pt, m.fmt)
                 if fy: return (fy[0], rtp[0] if rtp else None)
-        return (None, None)
+        return None, None
 
     def hasYourFormat(self, fmt): # check whether the fmt is available in yoursdp
         if self.yoursdp:
@@ -840,7 +857,8 @@ class Session(object):
 
     def _receivedRequest(self, request):
         '''Callback when received an incoming request.'''
-        if _debug: print 'session receivedRequest', request.method, 'ua=', self.ua
+        log.debug('session receivedRequest %s %s %s', request.method,
+                  'ua=', self.ua)
         ua = self.ua
         if request.method == 'INVITE': yield self._receivedReInvite(request)
         elif request.method == 'BYE': # remote terminated the session
@@ -858,43 +876,48 @@ class Session(object):
 
     def _receivedResponse(self, response):
         '''Callback when received an incoming response.'''
-        if _debug: print 'session receivedResponse', response.response, 'ua=', self.ua
+        log.debug('session receivedResponse %s ua= %s', response.response,
+                  'ua=', self.ua)
         method = response.CSeq.method
-        if _debug: print 'Ignoring response ', response.response, 'of', method
+        log.debug('Ignoring response %s of %s', response.response, method)
 
     def _checkconnectivity(self, outgoing):
         '''Check media connectivity using ICE-style checks on mediasock. After it is done
         it returns 'connected' from register()'''
-        if _debug: print 'check connectivity, local=', self.local, 'remote=', self.remote
+        log.debug('check connectivity, local=%s remote=%s', self.local,
+                  self.remote)
         try:
             retry = 7 # retry count
             while retry>0:
                 if not self.remote:
                     break
                 for dest in self.remote: # send a ping to all remote candidates
-                    if _debug: print 'sending connectivity request from', self.mediasock.getsockname(), 'to', dest
+                    log.debug('sending connectivity request from %s to %s',
+                              self.mediasock.getsockname(), dest)
                     try: self.mediasock.sendto('request', dest)
                     except: pass # ignore any ICMP error.
                 try:
                     while True:
                         response, remote = yield multitask.recvfrom(self.mediasock, 1500, timeout=1) # TODO: is the timeout too small?
                         if len(response) > 10: # probably a pending stun response from stun server
-                            if _debug: print 'ignoring a late stun response, len=', len(response), 'remote=', remote
+                            log.debug(
+                                'ignoring a late stun response, len=%s '
+                                'remote=%s', len(response), remote)
                             continue
                         break
                 except multitask.Timeout:
                     retry = retry-1
                     continue
 
-                if _debug: print 'received from', remote, 'response=', response
+                log.debug('received from %s response=%s %s', remote, response)
                 #talk.mediasock.connect(remote) # connect the UDP socket to that address
                 if response == 'request':
                     self.mediasock.sendto('response', remote)
-                if _debug: print 'connected to peer', remote
+                log.debug('connected to peer %s', remote)
                 self.remotemediaaddr = remote
                 break # connectivity check is completed
         except:
-            if _debug: print '_checkconnectivity() exception', (sys and sys.exc_info() or None)
+            log.exception('_checkconnectivity() exception')
 
     def _receivedReInvite(self, request): # only accept re-invite if no new media stream.
         if not self.media or not hasattr(self.media, 'mysdp') or not hasattr(self.media, 'yoursdp') or not hasattr(self.media, 'setRemote'):
@@ -914,7 +937,7 @@ class Session(object):
 
     def hold(self, value): # send re-INVITE with SDP ip=0.0.0.0
         if self.media and hasattr(self.media, 'hold') and hasattr(self.media, 'mysdp'):
-            self.media.hold(value);
+            self.media.hold(value)
             self.change(self.media.mysdp)
         else: raise ValueError('No media attribute found')
 
@@ -1001,7 +1024,7 @@ class Presence(object):
     def _receivedResponse(self, response):
         '''Callback when received an incoming response.'''
         method = response.CSeq.method
-        if _debug: print 'Ignoring response ', response.response, 'of', method
+        log.debug('Ignoring response %s of %s', response.response, method)
 
 #------------------------------ Conf --------------------------------------
 
@@ -1286,7 +1309,7 @@ class Conf(object):
             if E[0][0]:  # member is present, accept
                 member = E[0][0]
                 if isinstance(member, Member):
-                    if _debug: print 'NOT A MEMBER', type(member)
+                    log.debug('NOT A MEMBER %s', type(member))
 
                 m = ua.createResponse(200, 'OK')
                 ua.queue = multitask.Queue()
