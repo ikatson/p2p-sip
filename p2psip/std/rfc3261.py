@@ -9,9 +9,9 @@ compactness of the code.
 '''
 
 import re, socket, traceback
-from kutil import getlocaladdr
-from rfc2396 import isIPv4, isMulticast, isLocal, isPrivate, URI, Address
-from rfc2617 import createAuthorization
+from p2psip.std.kutil import getlocaladdr
+from p2psip.std.rfc2396 import isIPv4, isMulticast, isLocal, isPrivate, URI, Address
+from p2psip.std.rfc2617 import createAuthorization
 from socket import gethostbyname # TODO: should replace with getifaddr, SRV, NAPTR or similar
 
 _debug = False

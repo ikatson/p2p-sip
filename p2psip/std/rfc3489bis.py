@@ -10,7 +10,7 @@
 
 from __future__ import with_statement
 from contextlib import closing
-from kutil import getlocaladdr
+from p2psip.std.kutil import getlocaladdr
 import sys, traceback, struct, socket, multitask, random, time
 try:
     from os import urandom # urandom returns random bytes (str) of given length

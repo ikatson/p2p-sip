@@ -4,8 +4,8 @@
 
 import time, sys, select, multitask, traceback
 if __name__ == '__main__': sys.path.append('../external'); sys.path.append('../std')
-from simplexml import XML, XMLList
-from rfc3920 import Connection, JID, Stanza, bind, authenticate
+from p2psip.external.simplexml import XML, XMLList
+from p2psip.std.rfc3920 import Connection, JID, Stanza, bind, authenticate
 
 #------------------------------------------------------------------------------
 # Private utility definitions

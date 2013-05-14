@@ -51,10 +51,10 @@ if os.name == 'nt': # on windows import w32util and use RegistryResolve
     _nameservers = w32util.RegistryResolve()
 else: _nameservers = None
 
-import dns
-from std.rfc2396 import URI, isIPv4
+from p2psip.external import dns
+from p2psip.std.rfc2396 import URI, isIPv4
 
-_debug = False; # enable debug trace or not
+_debug = False # enable debug trace or not
 _resolver, _cache = None, {} # Name servers, resolver and DNS cache (plus negative cache)
 _proto = {'udp': ('sip+d2u', 5060), 'tcp': ('sip+d2t', 5060), 'tls': ('sips+d2t', 5061), 'sctp': ('sip+d2s', 5060)} # map from transport to details
 _rproto = dict([(x[1][0], x[0]) for x in _proto.iteritems()]) # reverse mapping {'sip+d2u': 'udp', ...} 

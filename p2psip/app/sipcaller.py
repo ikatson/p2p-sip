@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-'''
+"""
 A caller application to initiate or receive VoIP calls from command line.
 It using 39peer's SIP, SDP, RTP, voip modules and py-audio project.
 
@@ -27,14 +27,14 @@ Options:
 
     --int-ip=INT_IP     listening IP address for SIP and RTP. Use this option
                         only if you wish to select one out of multiple IP
-                        interfaces. Default "0.0.0.0"
+                        interfaces. Default \"0.0.0.0\"
     --ext-ip=EXT_IP     IP address to advertise in SIP/SDP. Use this to
                         specify external IP if running on EC2. Default is to
-                        use "--int-ip" if supplied or any local interface,
-                        which is "192.168.1.10"
+                        use \"--int-ip\" if supplied or any local interface,
+                        which is \"192.168.1.10\"
     --transport=TRANSPORTS
-                        the transport type is one of "udp", "tcp" or "tls".
-                        Default is "udp"
+                        the transport type is one of \"udp\", \"tcp\" or \"tls\".
+                        Default is \"udp\"
     --port=PORT         listening port number for SIP UDP/TCP. TLS is one more
                         than this. Default is 5092
     --listen-queue=LISTEN_QUEUE
@@ -48,20 +48,20 @@ Options:
 
     --user-agent=USER_AGENT
                         set this as User-Agent header in outbound SIP request.
-                        Default is empty "" to not set
+                        Default is empty \"\" to not set
     --subject=SUBJECT   set this as Subject header in outbound SIP request.
-                        Default is empty "" to not set
+                        Default is empty \"\" to not set
     --user=USER         username to use in my SIP URI and contacts. Default is
-                        "kundan"
+                        \"kundan\"
     --domain=DOMAIN     domain portion of my SIP URI. Default is to use local
-                        hostname, which is "Macintosh-2.local"
+                        hostname, which is \"Macintosh-2.local\"
     --proxy=PROXY       IP address of the SIP proxy to use. Default is empty
-                        "" to mean disable outbound proxy
+                        \"\" to mean disable outbound proxy
     --strict-route      use strict routing instead of default loose routing
                         when proxy option is specified
-    --to=TO             the target SIP address, e.g., '"Henry Sinnreich"
+    --to=TO             the target SIP address, e.g., '\"Henry Sinnreich\"
                         <sip:henry@iptel.org>'. This is mandatory
-    --uri=URI           the target request-URI, e.g., "sip:henry@iptel.org".
+    --uri=URI           the target request-URI, e.g., \"sip:henry@iptel.org\".
                         Default is to derive from the --to option
     --listen            enable listen mode without REGISTER and wait for
                         incoming INVITE or MESSAGE
@@ -108,7 +108,7 @@ Feel free to explore other command line options.
 
 To report any problem in this software, use the -V option to generate the full debug trace,
 and send it along with your bug report to the author or support mailing list.
-'''
+"""
 
 try: import gevent
 except ImportError: print 'Please install gevent and its dependencies and include them in your PYTHONPATH'; import sys; sys.exit(1)
@@ -116,12 +116,15 @@ from gevent import monkey, Greenlet, GreenletExit
 monkey.patch_socket()
 from gevent.queue import Queue 
 import os, sys, re, traceback, socket, random, logging
-try: 
-    from p2psip.app import voip; from std import rfc3261, rfc2396, rfc3550, rfc4566, kutil
-    from p2psip.external import log
-except ImportError: print 'Please install p2p-sip and include p2p-sip/src and p2p-sip/src/external in your PYTHONPATH'; traceback.print_exc(); sys.exit(1)
-try: import audiodev, audiospeex, audioop
-except ImportError: print 'Please install py-audio in your PYTHONPATH'; traceback.print_exc(); sys.exit(1)
+
+from p2psip.app import voip
+from p2psip.std import rfc3261, rfc2396, rfc3550, rfc4566, kutil
+from p2psip.external import log
+
+try:
+    import audiodev, audiospeex, audioop
+except ImportError:
+    raise Exception('Please install py-audio in your PYTHONPATH')
 
 logger = logging.getLogger('caller')
 

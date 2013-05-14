@@ -45,7 +45,7 @@ newOffer = createOffer([audio], offer)
 # @implements RFC3264 P1L27-P1L36
 # @implements RFC3264 P3L18-P3L21
 
-from std.rfc4566 import SDP, attrs as format  # although RFC 3264 used old RFC 2327 for SDP definition, we use new RFC 4566
+from p2psip.std.rfc4566 import SDP, attrs as format  # although RFC 3264 used old RFC 2327 for SDP definition, we use new RFC 4566
 
 _debug = True
 

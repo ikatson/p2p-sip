@@ -18,7 +18,7 @@ Document has form, menu, meta, metadata, var, script, property, catch and link
 
 import sys, select, urllib2, traceback
 if __name__ == '__main__': sys.path.append('../../external')
-from simplexml import XML, XMLList, parser
+from p2psip.external.simplexml import XML, XMLList, parser
 import multitask
 
 _debug = True

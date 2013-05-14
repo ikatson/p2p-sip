@@ -279,8 +279,8 @@ class Message(dict):
             elif t == 'int32':
                 self[name] = struct.unpack('!I', elem)[0]
             elif t == 'int64':
-                self[name] = struct.unpack('!I', elem[:4])[0] * (2 ** 32) +
-                             struct.unpack('!I', elem[4:8])[0]
+                self[name] = (struct.unpack('!I', elem[:4])[0] * (2 ** 32) +
+                              struct.unpack('!I', elem[4:8])[0])
             elif t == 'hash':
                 self[name] = bin2int(elem)
             elif t == 'node':

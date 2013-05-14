@@ -5,8 +5,10 @@ import time, sys, re, socket, select, base64, md5, multitask, traceback, random
 from xml.parsers import expat
 
 if __name__ == '__main__': sys.path.append('../external')
-from simplexml import XML, XMLList, parser
-import dns, rfc3263, kutil
+from p2psip.external.simplexml import XML, XMLList, parser
+from p2psip.external import dns
+import rfc3263
+import kutil
 
 _debug = False
 
